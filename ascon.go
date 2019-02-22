@@ -1,50 +1,102 @@
-package main
+package ascon
 
-// #cgo CFLAGS: -std=c99 -Wall
-// #include "api.h"
+// #cgo CFLAGS: -Wall -O2
 // #include "crypto_aead.h"
 import "C"
 import (
-	"fmt"
+	"crypto/cipher"
+	"errors"
 	"reflect"
 	"unsafe"
 )
 
-func main() {
+// Expected key, nonce and authentication tag overhead lengths
+const (
+	KeySize   = 16
+	NonceSize = 16
+	Overhead  = 16
+)
 
-	// plaintext and associated data
-	plaintext := []byte("Hello, World!")
-	associatedData := []byte("ascon")
-
-	// keying
-	npub := []byte("0123456701234567")
-	key := []byte("0123456789abcdef")
-
-	fmt.Printf("%s\n", plaintext)
-
-	c := ascon_encrypt(plaintext, associatedData, npub, key)
-	fmt.Printf("%#x\n", c)
-
+type ascon struct {
+	key []byte
 }
 
-func ascon_encrypt(pt, ad, nonce, key []byte) (ct []byte) {
+var errAuth = errors.New("ascon: message authentication failed")
 
-	ptHeader := (*reflect.SliceHeader)(unsafe.Pointer(&pt))
-	adHeader := (*reflect.SliceHeader)(unsafe.Pointer(&ad))
+func New(key []byte) (cipher.AEAD, error) {
+	if len(key) != KeySize {
+		return nil, errors.New("ascon: bad key length")
+	}
+	return &ascon{key}, nil
+}
+
+func (c *ascon) NonceSize() int {
+	return NonceSize
+}
+
+func (c *ascon) Overhead() int {
+	return Overhead
+}
+
+func (c *ascon) Seal(dst, nonce, plaintext, associated []byte) []byte {
+
+	if len(nonce) != NonceSize {
+		panic("ascon: bad nonce length")
+	}
+
+	plaintextHeader := (*reflect.SliceHeader)(unsafe.Pointer(&plaintext))
+	associatedHeader := (*reflect.SliceHeader)(unsafe.Pointer(&associated))
 	nonceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&nonce))
-	keyHeader := (*reflect.SliceHeader)(unsafe.Pointer(&key))
+	keyHeader := (*reflect.SliceHeader)(unsafe.Pointer(&c.key))
 
-	ct = make([]byte, ptHeader.Len+C.CRYPTO_KEYBYTES)
-	ctHeader := (*reflect.SliceHeader)(unsafe.Pointer(&ct))
+	dst = make([]byte, plaintextHeader.Len+Overhead)
+	dstHeader := (*reflect.SliceHeader)(unsafe.Pointer(&dst))
 
-	C.crypto_aead_encrypt(
-		(*C.uchar)(unsafe.Pointer(ctHeader.Data)), (*C.ulonglong)(unsafe.Pointer(&ctHeader.Len)),
-		(*C.uchar)(unsafe.Pointer(ptHeader.Data)), C.ulonglong(ptHeader.Len),
-		(*C.uchar)(unsafe.Pointer(adHeader.Data)), C.ulonglong(adHeader.Len),
+	ret := C.crypto_aead_encrypt(
+		(*C.uchar)(unsafe.Pointer(dstHeader.Data)), (*C.ulonglong)(unsafe.Pointer(&dstHeader.Len)),
+		(*C.uchar)(unsafe.Pointer(plaintextHeader.Data)), C.ulonglong(plaintextHeader.Len),
+		(*C.uchar)(unsafe.Pointer(associatedHeader.Data)), C.ulonglong(associatedHeader.Len),
 		(*C.uchar)(unsafe.Pointer(nil)),
 		(*C.uchar)(unsafe.Pointer(nonceHeader.Data)),
 		(*C.uchar)(unsafe.Pointer(keyHeader.Data)),
 	)
 
-	return
+	if ret != 0 {
+		panic("ascon: encryption failed")
+	}
+
+	return dst
+}
+
+func (c *ascon) Open(dst, nonce, ciphertext, associated []byte) ([]byte, error) {
+
+	if len(nonce) != NonceSize {
+		panic("ascon: bad nonce length")
+	}
+	if len(ciphertext) < Overhead {
+		return nil, errAuth
+	}
+
+	ciphertextHeader := (*reflect.SliceHeader)(unsafe.Pointer(&ciphertext))
+	associatedHeader := (*reflect.SliceHeader)(unsafe.Pointer(&associated))
+	nonceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&nonce))
+	keyHeader := (*reflect.SliceHeader)(unsafe.Pointer(&c.key))
+
+	dst = make([]byte, ciphertextHeader.Len-Overhead)
+	dstHeader := (*reflect.SliceHeader)(unsafe.Pointer(&dst))
+
+	ret := C.crypto_aead_decrypt(
+		(*C.uchar)(unsafe.Pointer(dstHeader.Data)), (*C.ulonglong)(unsafe.Pointer(&dstHeader.Len)),
+		(*C.uchar)(unsafe.Pointer(nil)),
+		(*C.uchar)(unsafe.Pointer(ciphertextHeader.Data)), C.ulonglong(ciphertextHeader.Len),
+		(*C.uchar)(unsafe.Pointer(associatedHeader.Data)), C.ulonglong(associatedHeader.Len),
+		(*C.uchar)(unsafe.Pointer(nonceHeader.Data)),
+		(*C.uchar)(unsafe.Pointer(keyHeader.Data)),
+	)
+
+	if ret != 0 {
+		return nil, errAuth
+	}
+
+	return dst, nil
 }
