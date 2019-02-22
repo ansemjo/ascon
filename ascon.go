@@ -1,3 +1,7 @@
+// Package ascon binds to the C reference implementation of
+// Ascon-128 v1.2 from the final CAESAR portfolio and implements
+// the cipher.AEAD interface.
+// https://ascon.iaik.tugraz.at/specification.html
 package ascon
 
 // #cgo CFLAGS: -Wall -O2
@@ -21,8 +25,10 @@ type ascon struct {
 	key []byte
 }
 
+// generic error when decryption fails
 var errAuth = errors.New("ascon: message authentication failed")
 
+// New returns a new Ascon-128 AEAD that uses the given 128-bit key.
 func New(key []byte) (cipher.AEAD, error) {
 	if len(key) != KeySize {
 		return nil, errors.New("ascon: bad key length")
@@ -38,6 +44,7 @@ func (c *ascon) Overhead() int {
 	return Overhead
 }
 
+// Seal encrypts and authenticates the given plaintext.
 func (c *ascon) Seal(dst, nonce, plaintext, associated []byte) []byte {
 
 	if len(nonce) != NonceSize {
@@ -68,6 +75,8 @@ func (c *ascon) Seal(dst, nonce, plaintext, associated []byte) []byte {
 	return dst
 }
 
+// Open decrypts the given ciphertext and errors if authentication or
+// decryption fails.
 func (c *ascon) Open(dst, nonce, ciphertext, associated []byte) ([]byte, error) {
 
 	if len(nonce) != NonceSize {
