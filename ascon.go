@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Anton Semjonov
+// Licensed under the MIT License
+
 // Package ascon binds to the C reference implementation of
 // Ascon-128 v1.2 from the final CAESAR portfolio and implements
 // the cipher.AEAD interface.

@@ -1,3 +1,6 @@
+// Copyright (c) 2019 Anton Semjonov
+// Licensed under the MIT License
+
 package main
 
 import (
